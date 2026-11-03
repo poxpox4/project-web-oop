@@ -1,14 +1,16 @@
 import { useState } from "react";
-import { evaluate } from "mathjs";
 import { MathJax,MathJaxContext } from "better-react-mathjax";
 import Plot from "react-plotly.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import axios from "axios";
+import { rootEquationService } from "../lib/equationService";
+import { SolverError } from "../lib/errors";
+import { OpenRootOfEquationProblem } from "../lib/rootOfEquationProblem";
+import { OnePointIterationSolver } from "../lib/solvers/onePointIterationSolver";
 function Onepoint(){
     const [fx,setFx] = useState("");
-    const [x0,setX0] = useState();
+    const [x0,setX0] = useState("");
     //const [x1,setXl] = useState("");
-    const [error,setError] = useState();
+    const [error,setError] = useState("");
     const [result,setResult] = useState(null);
     const [iteration,setIteration] = useState([]);
     //backend
@@ -17,10 +19,7 @@ function Onepoint(){
     //get DB
     const {data: equation = [],isLoading,error:fetchError} = useQuery({
         queryKey: ["equation"],
-        queryFn: async () => {
-            const res = await axios.get("http://localhost:5000/root");
-            return res.data || [];
-        }
+        queryFn: () => rootEquationService.getAll(),
     })
     //Select
     const Select = (e) => {
@@ -31,10 +30,7 @@ function Onepoint(){
     }
     //Add
     const addEquationMutation = useMutation({
-        mutationFn: async (newEquation) => {
-            const res = await axios.post("http://localhost:5000/root",{equation:newEquation});
-            return res.data;
-        },
+        mutationFn: (newEquation) => rootEquationService.add(newEquation),
         onSuccess: (data) => {
             if(data.success){
                 alert("เพิ่มสมการสำเร็จ");
@@ -56,42 +52,14 @@ function Onepoint(){
     }
     function Calculate(){
         try{
-            if(!fx||!x0||!error){
-                alert("กรุณากรอก f(x), X Start และ ERROR ให้ครบก่อนคำนวณ");
-                return;
-            }
-            const variablematch = fx.match(/[a-zA-Z]+/g);
-            const variable = variablematch ? variablematch[variablematch.length-1] : "x";
-            let x0cal = parseFloat(x0);
-            let xold = 0;
-            let x1 = 0;
-            const agree = parseFloat(error);
-            const resultarr = [];
-            let errorcal = 0;
-            do{
-                xold = x0cal;
-                x1 = evaluate(fx,{[variable]:x0cal});
-                if(x1==0){
-                    alert("X Start ต้องไม่เท่ากับ 0 ใส่ X Start ใหม่");
-                    return;
-                }
-                errorcal = Math.abs((x1-xold)/x1);
-                resultarr.push({
-                    x0:x0cal,
-                    x1,error:errorcal,
-                })
-                
-                x0cal = x1;
-                if (resultarr.length > 100) {
-                    alert("ทำงานเยอะเกิน ใส่ X start หรือ f(x) ใหม่");
-                    return;
-                }
-            }while(Math.abs((x1-xold)/x1)>agree);
-            setResult(x1);
-            setIteration(resultarr);
+            const problem = new OpenRootOfEquationProblem({ fx, x0, error });
+            const solver = new OnePointIterationSolver(problem);
+            const output = solver.getOutput();
+            setResult(output.result);
+            setIteration(output.iterations);
         }
-        catch{
-            alert("สมการผิด");
+        catch(e){
+            alert(e instanceof SolverError ? e.message : "สมการผิด");
         }
     }
     if(isLoading) return <div>Loading...</div>

@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { evaluate } from "mathjs";
 import Plot from "react-plotly.js";
 import { MathJax,MathJaxContext } from "better-react-mathjax";
 import { useQuery,useQueryClient,useMutation } from "@tanstack/react-query";
-import axios from "axios";
+import { rootEquationService } from "../lib/equationService";
+import { SolverError } from "../lib/errors";
+import { RootOfEquationProblem } from "../lib/rootOfEquationProblem";
+import { FalsePositionSolver } from "../lib/solvers/falsePositionSolver";
 function Falseposition(){
     const [fx,setFx] = useState("");
-    const [xl,setXl] = useState();
-    const [xr,setXr] = useState();
+    const [xl,setXl] = useState("");
+    const [xr,setXr] = useState("");
     //const [x1,setX1] = useState("");
-    const [error,setError] = useState();
+    const [error,setError] = useState("");
     const [result,setResult] = useState(null);
     const [iteration,setIteration] = useState([]);
     //backend
@@ -18,10 +20,7 @@ function Falseposition(){
     //get DB
     const {data: equation = [],isLoading,error:fetchError} = useQuery({
         queryKey: ["equation"],
-        queryFn: async () => {
-            const res = await axios.get("http://localhost:5000/root");
-            return res.data || [];
-        }
+        queryFn: () => rootEquationService.getAll(),
     })
     //Select
     const Select = (e) => {
@@ -32,10 +31,7 @@ function Falseposition(){
     }
     //Add
     const addEquationMutation = useMutation({
-        mutationFn: async (newEquation) => {
-            const res = await axios.post("http://localhost:5000/root",{equation:newEquation});
-            return res.data;
-        },
+        mutationFn: (newEquation) => rootEquationService.add(newEquation),
         onSuccess: (data) => {
             if(data.success){
                 alert("เพิ่มสมการสำเร็จ");
@@ -57,50 +53,14 @@ function Falseposition(){
     }
     function Calculate(){
         try{
-            if (!fx || !xl || !xr || !error) {
-                alert("กรุณากรอก f(x), XL, XR และ ERROR ให้ครบก่อนคำนวณ");
-                return;
-            }
-            const variablematch = fx.match(/[a-zA-Z]+/g);
-            const variable = variablematch ? variablematch[variablematch.length-1] : "x";
-            let xlcal = parseFloat(xl);
-            let xrcal = parseFloat(xr);
-            const agree = parseFloat(error);
-            let fxl = evaluate(fx,{[variable]:xlcal});
-            let fxr = evaluate(fx,{[variable]:xrcal});
-            let x1 = (fxr*xlcal-fxl*xrcal)/(fxr-fxl);
-            let fx1 = evaluate(fx,{[variable]:x1});
-            let x1old = 0;
-            //let errorcal = 0;
-            const resultarr = [];
-            //x1old = x1; //x0รอบgiven
-            do{
-                
-                let errorcal = Math.abs((x1-x1old)/x1);
-                resultarr.push({
-                    xl: xlcal,
-                    xr: xrcal,
-                    fxl,fxr,x1,fx1,error:errorcal,
-                })
-                x1old = x1;
-                if(fxl*fx1>0){
-                    xlcal = x1;
-                }
-                else{
-                    xrcal = x1;
-                }
-                
-                fxl = evaluate(fx,{[variable]:xlcal});
-                fxr = evaluate(fx,{[variable]:xrcal});
-                x1  = (fxr*xlcal-fxl*xrcal)/(fxr-fxl);
-                fx1 = evaluate(fx,{[variable]:x1});
-                //errorcal = Math.abs((x1-x1old)/x1);
-            }while(Math.abs((x1-x1old)/x1)>agree&&Math.abs(fx1)>agree);
-            setResult(x1);
-            setIteration(resultarr);
+            const problem = new RootOfEquationProblem({ fx, xl, xr, error });
+            const solver = new FalsePositionSolver(problem);
+            const output = solver.getOutput();
+            setResult(output.result);
+            setIteration(output.iterations);
         }
-        catch{
-            alert("สมการผิด");
+        catch(e){
+            alert(e instanceof SolverError ? e.message : "สมการผิด");
         }
     }
     if(isLoading) return <div>Loading...</div>

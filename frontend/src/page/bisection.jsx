@@ -1,9 +1,11 @@
 import { useState } from "react";
-import {evaluate} from "mathjs";
 import Plot from 'react-plotly.js';
 import { MathJax,MathJaxContext } from "better-react-mathjax";
 import {useQuery,useMutation,useQueryClient} from "@tanstack/react-query";
-import axios from "axios";
+import { rootEquationService } from "../lib/equationService";
+import { SolverError } from "../lib/errors";
+import { RootOfEquationProblem } from "../lib/rootOfEquationProblem";
+import { BisectionSolver } from "../lib/solvers/bisectionSolver";
 function Bisection(){
     const [fx,setFx] = useState("");
     const [xl,setXl] = useState("");
@@ -17,10 +19,7 @@ function Bisection(){
     //ดึงข้อมูลจากDB
     const { data: equation = [], isLoading, error: fetchError } = useQuery({
         queryKey: ["equation"],
-        queryFn: async () => {
-            const res = await axios.get("http://localhost:5000/root");
-            return res.data || [];
-        },
+        queryFn: () => rootEquationService.getAll(),
     });
     // เมื่อเลือกสมการ
     const Select = (e) => {
@@ -31,10 +30,7 @@ function Bisection(){
     }
     // เพิ่มสมการใหม่
     const addEquationMutation = useMutation({
-        mutationFn: async (newEquation) => {
-            const res = await axios.post("http://localhost:5000/root", { equation: newEquation });
-            return res.data;
-        },
+        mutationFn: (newEquation) => rootEquationService.add(newEquation),
         onSuccess: (data) => {
             if (data.success) {
                 alert("บันทึกสมการสำเร็จ");
@@ -56,46 +52,16 @@ function Bisection(){
     
     function Calculate(){
         try{
-            if (!fx || !xl || !xr || !error) {
-                alert("กรุณากรอก f(x), XL, XR และ ERROR ให้ครบก่อนคำนวณ");
-                return;
-            }
-            const variablematch = fx.match(/[a-zA-Z]+/g);
-            const variable = variablematch ? variablematch[variablematch.length-1] : "x";
-            let xlcal = parseFloat(xl);
-            let xrcal = parseFloat(xr);
-            let agree = parseFloat(error);
-            let xmnew = (xlcal+xrcal)/2;
-            let xmold = 0;
-            //const fxmnew = evaluate(fx,{[variable]:xmnew});
-            const resultarr = [];
-            do{
-                const fxl = evaluate(fx,{[variable]:xlcal});
-                const fxm = evaluate(fx,{[variable]:xmnew});
-                let errorcal = Math.abs((xmnew-xmold)/xmnew)
-                resultarr.push({
-                    xl: xlcal,
-                    xr: xrcal,
-                    xm: xmnew,
-                    fxl,fxm,error:errorcal,
-                })
-                if(fxl*fxm>0){
-                    xlcal = xmnew;
-                }
-                else{
-                    xrcal = xmnew;
-                }
-                xmold = xmnew;
-                xmnew = (xlcal+xrcal)/2;
-            }while(Math.abs((xmnew-xmold)/xmnew)>agree&&Math.abs(evaluate(fx,{[variable]:xmnew}))>agree);
-            setIteration(resultarr);
-            setResult(xmnew);
+            const problem = new RootOfEquationProblem({ fx, xl, xr, error });
+            const solver = new BisectionSolver(problem);
+            const output = solver.getOutput();
+            setResult(output.result);
+            setIteration(output.iterations);
         }
-        catch{
-            alert("สมการผิด");
+        catch(e){
+            alert(e instanceof SolverError ? e.message : "สมการผิด");
         }
     }
-    
     if (isLoading) return <div>Loading...</div>;
     if (fetchError) return <div>Error fetching equations</div>;
     return(
